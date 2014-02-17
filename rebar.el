@@ -87,9 +87,7 @@ If t use all backends in `vc-handled-backends'."
   (let ((prompt (if (and default-value
                          (not (string-match-p "(default .*?): *\\'" prompt)))
                     (format "%s (default %s): "
-                            (if (string-match ": *\\'" prompt)
-                                (substring prompt 0 (match-beginning 0))
-                              prompt)
+                            (substring prompt 0 (string-match-p ": *\\'" prompt))
                             (or (car-safe default-value) default-value))
                   prompt)))
     (read-string prompt initial-input history default-value
@@ -130,10 +128,7 @@ If t use all backends in `vc-handled-backends'."
       (setq rebar-project-root (funcall rebar-find-project-function))))
 
 (defmacro rebar-ensure-directory (&rest body)
-  `(let* ((default-directory (rebar-project-root))
-          (process-environment
-           (cons (concat "PATH=" (concat default-directory ":" (getenv "PATH")))
-                 process-environment)))
+  `(let ((default-directory (file-name-as-directory (rebar-project-root))))
      ,@body))
 
 (defvar rebar-compilation-finish-functions nil)
@@ -231,11 +226,7 @@ If t use all backends in `vc-handled-backends'."
          (suites (rebar-read-string "Test suites: " nil nil suite)))
     (setq rebar-test-suite
           (unless (equal suites "")
-            (format "suites=%S"
-                    (mapconcat 'identity
-                               (split-string (substring-no-properties suites)
-                                             ",[ \t]*" t)
-                               ","))))))
+            (format "suites=%S" (substring-no-properties suites))))))
 
 ;;;###autoload
 (defun rebar-eunit (&optional test-suite)
@@ -261,9 +252,17 @@ If t use all backends in `vc-handled-backends'."
 ;;;###autoload
 (define-minor-mode rebar-mode nil
   :lighter (:eval (if global-rebar-mode "" " RB")))
+
 ;;;###autoload
 (define-minor-mode global-rebar-mode nil
-  :lighter " GRB" :global t :keymap rebar-mode-map)
+  :lighter " GRB" :global t :keymap rebar-mode-map
+  (if global-rebar-mode
+      (add-hook 'minibuffer-setup-hook #'rebar-minibuffer-setup-function)
+    (remove-hook 'minibuffer-setup-hook #'rebar-minibuffer-setup-function)))
+
+(defun rebar-minibuffer-setup-function ()
+  ;; Disable the keymap in minibuffer.
+  (set (make-local-variable 'global-rebar-mode) nil))
 
 (defvar rebar-menu-items '(("Rebar"
                             (("Run Command" rebar)
