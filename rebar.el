@@ -31,6 +31,7 @@
 (require 'cl-lib)
 (eval-when-compile (require 'compile))
 (autoload 'vc-responsible-backend "vc")
+(autoload 'erlext-binary-to-term "erlext") ;part of distel
 
 (defgroup rebar nil
   "An Erlang build tool."
@@ -215,6 +216,81 @@ If t use all backends in `vc-handled-backends'."
   (interactive "P")
   (rebar-start (and clean "clean") "compile"))
 
+(defun rebar-read-term ()
+  (let* ((to-term (lambda (beg len)
+                    (prog1 (erlext-binary-to-term
+                            (buffer-substring beg (+ beg len)))
+                      (forward-char len))))
+         (size (prog1 (get-byte) (forward-char 1)))
+         (term (funcall to-term (point) size)))
+    ;; Could use mcase but it introduces too many compiler warnings.
+    (if (and (vectorp term) (eq (aref term 0) '$size))
+        (funcall to-term (point) (aref term 1))
+      term)))
+
+(defvar rebar-coverdata nil)
+
+;; See cover:do_import_to_table for details of the return value.
+(defun rebar-read-coverdata (coverdata)
+  (when (file-exists-p coverdata)
+    (with-temp-buffer
+      (set-buffer-multibyte nil)
+      (insert-file-contents coverdata)
+      (setq rebar-coverdata
+            (cl-loop while (not (eobp))
+                     collect (rebar-read-term))))))
+
+(defun rebar-covered-modules ()
+  (cl-loop for term in rebar-coverdata
+           when (and (vectorp term) (eq (aref term 0) 'file))
+           collect (aref term 1)))
+
+(defun rebar-covered-lines (module)
+  ;; Return A list of (LINE COUNT).
+  (when module
+    (cl-flet ((aref-safe (object idx)
+                         (ignore-errors (aref object idx))))
+      (cl-loop for term in rebar-coverdata
+               when (and (eq (aref-safe (aref-safe term 0) 0) 'bump)
+                         (eq (aref-safe (aref-safe term 0) 1) module))
+               collect (list (aref-safe (aref-safe term 0) 5)
+                             (aref-safe term 1))))))
+
+(defun rebar-cover-annotate (&optional remove)
+  (interactive "P")
+  (remove-overlays nil nil 'rebar-cover t)
+  (or rebar-coverdata (user-error "Cover data not available"))
+  (unless remove
+    (let* ((module (and buffer-file-name
+                        (intern-soft
+                         (file-name-sans-extension
+                          (file-name-nondirectory buffer-file-name)))))
+           (_ (or (memq module (rebar-covered-modules))
+                  (user-error "No coverage information for `%s'" module)))
+           (data (rebar-covered-lines module))
+           (count (cl-count-if-not #'zerop data :key #'cadr)))
+      (save-excursion
+        (save-restriction
+          (widen)
+          (dolist (d data)
+            (pcase d
+              (`(,line ,hits)
+               (goto-char (point-min))
+               (forward-line (1- line))
+               (let ((face (if (zerop hits) 'error 'success))
+                     (o (make-overlay (line-beginning-position)
+                                      (line-end-position))))
+                 (overlay-put o 'rebar-cover t)
+                 (overlay-put o 'before-string
+                              (apply #'propertize "|"
+                                     (if (zerop (car (window-fringes)))
+                                         ;; No left fringe
+                                         `(face ,face)
+                                       `(display (left-fringe
+                                                  centered-vertical-bar
+                                                  ,face)))))))))))
+      (message "%d%% covered" (/ (* count 100) (length data))))))
+
 (defvar-local rebar-test-suite nil)
 
 (defun rebar-set-test-suite ()
@@ -232,7 +308,16 @@ If t use all backends in `vc-handled-backends'."
 (defun rebar-eunit (&optional test-suite)
   (interactive "P")
   (and test-suite (rebar-set-test-suite))
-  (rebar-start "eunit" rebar-test-suite))
+  (let ((rebar-compilation-finish-functions rebar-compilation-finish-functions))
+    (add-hook #'rebar-compilation-finish-functions
+              (lambda (_buf msg)
+                (when (and (string-prefix-p "finished" msg)
+                           (save-excursion
+                             (goto-char (point-max))
+                             (re-search-backward "^Coverdata export: ?\\(.*\\)$" nil t)))
+                  (rebar-read-coverdata (match-string 1))
+                  (message "Rebar cover data updated"))))
+    (rebar-start "eunit" rebar-test-suite)))
 
 ;;;###autoload
 (defun rebar-ct (&optional test-suite)
@@ -242,6 +327,7 @@ If t use all backends in `vc-handled-backends'."
 
 (defvar rebar-mode-map
   (let ((m (make-sparse-keymap)))
+    (define-key m "\M-A" 'rebar-cover-annotate)
     (define-key m "\M-K" 'rebar-compile)
     (define-key m "\M-N" 'rebar-create)
     (define-key m "\M-R" 'rebar)
