@@ -245,10 +245,12 @@ If t use all backends in `vc-handled-backends'."
             (cl-loop while (not (eobp))
                      collect (rebar-read-term))))))
 
+(defun rebar-eunit-outdir ()
+  (let ((dir (locate-dominating-file default-directory ".eunit")))
+    (and dir (expand-file-name ".eunit" dir))))
+
 (defun rebar-load-coverdata ()
-  (rebar-read-coverdata (expand-file-name
-                         ".eunit/eunit.coverdata"
-                         (locate-dominating-file default-directory ".eunit"))))
+  (rebar-read-coverdata (expand-file-name "eunit.coverdata" (rebar-eunit-outdir))))
 
 (defun rebar-covered-lines (module)
   ;; Return a list of (LINE HITS).
@@ -260,6 +262,19 @@ If t use all backends in `vc-handled-backends'."
                          (eq (aref-safe (aref-safe term 0) 1) module))
                collect (list (aref-safe (aref-safe term 0) 5)
                              (aref-safe term 1))))))
+
+(defun rebar-cover-browse (&optional view-index)
+  (interactive "P")
+  (let* ((outdir (or (rebar-eunit-outdir) (user-error "No .eunit directory")))
+         (html (expand-file-name (if (or (not buffer-file-name) view-index)
+                                     "index.html"
+                                   (concat (file-name-sans-extension
+                                            (file-name-nondirectory buffer-file-name))
+                                           ".COVER.html"))
+                                 outdir)))
+    (if (file-exists-p html)
+        (browse-url html)
+      (user-error "File `%s' does not exist" html))))
 
 (unless (fringe-bitmap-p 'centered-vertical-bar)
   (define-fringe-bitmap 'centered-vertical-bar [24] nil nil '(top t)))
@@ -344,6 +359,8 @@ Needs these entries in rebar.config:
 (defvar rebar-mode-map
   (let ((m (make-sparse-keymap)))
     (define-key m "\M-A" 'rebar-cover-annotate)
+    (define-key m "\M-B" 'rebar-cover-browse)
+    (define-key m "\M-H" 'rebar-help)
     (define-key m "\M-K" 'rebar-compile)
     (define-key m "\M-N" 'rebar-create)
     (define-key m "\M-R" 'rebar)
@@ -374,7 +391,8 @@ Needs these entries in rebar.config:
                              ("Create" rebar-create)
                              ("EUnit" rebar-eunit)
                              ("Common Test" rebar-ct)
-                             ("Cover annotate buffer" rebar-cover-annotate))))
+                             ("Cover annotate buffer" rebar-cover-annotate)
+                             ("Browse .COVER.html file" rebar-cover-browse))))
   "See `erlang-menu-base-items' for documentation.")
 
 (defun rebar-install-erlang-menu ()
