@@ -30,6 +30,9 @@
 
 (require 'cl-lib)
 (eval-when-compile (require 'compile))
+(eval-and-compile
+  (or (fboundp 'user-error) (defalias 'user-error 'error)))
+
 (autoload 'vc-responsible-backend "vc")
 (autoload 'erlext-binary-to-term "erlext") ;part of distel
 
@@ -246,7 +249,7 @@ If t use all backends in `vc-handled-backends'."
            collect (aref term 1)))
 
 (defun rebar-covered-lines (module)
-  ;; Return A list of (LINE COUNT).
+  ;; Return a list of (LINE COUNT).
   (when module
     (cl-flet ((aref-safe (object idx)
                          (ignore-errors (aref object idx))))
@@ -256,7 +259,15 @@ If t use all backends in `vc-handled-backends'."
                collect (list (aref-safe (aref-safe term 0) 5)
                              (aref-safe term 1))))))
 
+(unless (fringe-bitmap-p 'centered-vertical-bar)
+  (define-fringe-bitmap 'centered-vertical-bar [24] nil nil '(top t)))
+
 (defun rebar-cover-annotate (&optional remove)
+  "Annotate current buffer with coverage data from eunit.
+
+Needs these entries in rebar.config:
+  {cover_enabled,true}.
+  {cover_export_enabled,true}."
   (interactive "P")
   (remove-overlays nil nil 'rebar-cover t)
   (or rebar-coverdata (user-error "Cover data not available"))
@@ -309,7 +320,7 @@ If t use all backends in `vc-handled-backends'."
   (interactive "P")
   (and test-suite (rebar-set-test-suite))
   (let ((rebar-compilation-finish-functions rebar-compilation-finish-functions))
-    (add-hook #'rebar-compilation-finish-functions
+    (add-hook 'rebar-compilation-finish-functions
               (lambda (_buf msg)
                 (when (and (string-prefix-p "finished" msg)
                            (save-excursion
