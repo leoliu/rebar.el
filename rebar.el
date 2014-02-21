@@ -3,7 +3,7 @@
 ;; Copyright (C) 2013-2014  Leo Liu
 
 ;; Author: Leo Liu <sdl.web@gmail.com>
-;; Version: 0.3.7
+;; Version: 0.4.0
 ;; Keywords: erlang, tools, processes
 ;; Created: 2013-12-19
 
@@ -30,11 +30,11 @@
 
 (require 'cl-lib)
 (eval-when-compile (require 'compile))
+(require 'erlext nil t)       ;part of distel, `erlext-binary-to-term'
+
 (eval-and-compile
   (or (fboundp 'user-error) (defalias 'user-error 'error)))
-
 (autoload 'vc-responsible-backend "vc")
-(autoload 'erlext-binary-to-term "erlext") ;part of distel
 
 (defgroup rebar nil
   "An Erlang build tool."
@@ -235,6 +235,8 @@ If t use all backends in `vc-handled-backends'."
 
 ;; See cover:do_import_to_table for details of the return value.
 (defun rebar-read-coverdata (coverdata)
+  (or (fboundp 'erl-binary-to-term)
+      (error "Library `erlext' required to parse cover data"))
   (when (file-exists-p coverdata)
     (with-temp-buffer
       (set-buffer-multibyte nil)
@@ -243,13 +245,13 @@ If t use all backends in `vc-handled-backends'."
             (cl-loop while (not (eobp))
                      collect (rebar-read-term))))))
 
-(defun rebar-covered-modules ()
-  (cl-loop for term in rebar-coverdata
-           when (and (vectorp term) (eq (aref term 0) 'file))
-           collect (aref term 1)))
+(defun rebar-load-coverdata ()
+  (rebar-read-coverdata (expand-file-name
+                         ".eunit/eunit.coverdata"
+                         (locate-dominating-file default-directory ".eunit"))))
 
 (defun rebar-covered-lines (module)
-  ;; Return a list of (LINE COUNT).
+  ;; Return a list of (LINE HITS).
   (when module
     (cl-flet ((aref-safe (object idx)
                          (ignore-errors (aref object idx))))
@@ -262,45 +264,47 @@ If t use all backends in `vc-handled-backends'."
 (unless (fringe-bitmap-p 'centered-vertical-bar)
   (define-fringe-bitmap 'centered-vertical-bar [24] nil nil '(top t)))
 
-(defun rebar-cover-annotate (&optional remove)
+(defun rebar-cover-annotate ()
   "Annotate current buffer with coverage data from eunit.
 
 Needs these entries in rebar.config:
   {cover_enabled,true}.
   {cover_export_enabled,true}."
-  (interactive "P")
-  (remove-overlays nil nil 'rebar-cover t)
+  (interactive (ignore (or rebar-coverdata (rebar-load-coverdata))))
   (or rebar-coverdata (user-error "Cover data not available"))
-  (unless remove
-    (let* ((module (and buffer-file-name
-                        (intern-soft
-                         (file-name-sans-extension
-                          (file-name-nondirectory buffer-file-name)))))
-           (_ (or (memq module (rebar-covered-modules))
-                  (user-error "No coverage information for `%s'" module)))
-           (data (rebar-covered-lines module))
-           (count (cl-count-if-not #'zerop data :key #'cadr)))
-      (save-excursion
-        (save-restriction
-          (widen)
-          (dolist (d data)
-            (pcase d
-              (`(,line ,hits)
-               (goto-char (point-min))
-               (forward-line (1- line))
-               (let ((face (if (zerop hits) 'error 'success))
-                     (o (make-overlay (line-beginning-position)
-                                      (line-end-position))))
-                 (overlay-put o 'rebar-cover t)
-                 (overlay-put o 'before-string
-                              (apply #'propertize "|"
-                                     (if (zerop (car (window-fringes)))
-                                         ;; No left fringe
-                                         `(face ,face)
-                                       `(display (left-fringe
-                                                  centered-vertical-bar
-                                                  ,face)))))))))))
-      (message "%d%% covered" (/ (* count 100) (length data))))))
+  (if (eq (next-single-char-property-change (point-min) 'rebar-cover)
+          (point-max))
+      (let* ((module (and buffer-file-name
+                          (intern-soft
+                           (file-name-sans-extension
+                            (file-name-nondirectory buffer-file-name)))))
+             (data (or (rebar-covered-lines module)
+                       (user-error "No coverage information for `%s'" module)))
+             (count (cl-count-if-not #'zerop data :key #'cadr)))
+        (save-excursion
+          (save-restriction
+            (widen)
+            (dolist (d data)
+              (pcase d
+                (`(,(and line (guard (< 0 line))) ,hits)
+                 (goto-char (point-min))
+                 (forward-line (1- line))
+                 (let ((face (if (zerop hits) 'error 'success))
+                       (o (make-overlay (line-beginning-position)
+                                        (line-end-position))))
+                   (overlay-put o 'rebar-cover t)
+                   (unless (zerop hits)
+                     (overlay-put o 'help-echo (format "Hits: %d" hits)))
+                   (overlay-put o 'before-string
+                                (apply #'propertize "|"
+                                       (if (zerop (car (window-fringes)))
+                                           ;; No left fringe
+                                           `(face ,face)
+                                         `(display (left-fringe
+                                                    centered-vertical-bar
+                                                    ,face)))))))))))
+        (message "%d%% covered" (/ (* count 100) (length data))))
+    (remove-overlays nil nil 'rebar-cover t)))
 
 (defvar-local rebar-test-suite nil)
 
@@ -320,14 +324,15 @@ Needs these entries in rebar.config:
   (interactive "P")
   (and test-suite (rebar-set-test-suite))
   (let ((rebar-compilation-finish-functions rebar-compilation-finish-functions))
-    (add-hook 'rebar-compilation-finish-functions
-              (lambda (_buf msg)
-                (when (and (string-prefix-p "finished" msg)
-                           (save-excursion
-                             (goto-char (point-max))
-                             (re-search-backward "^Coverdata export: ?\\(.*\\)$" nil t)))
-                  (rebar-read-coverdata (match-string 1))
-                  (message "Rebar cover data updated"))))
+    (when (fboundp 'erlext-binary-to-term)
+      (add-hook 'rebar-compilation-finish-functions
+                (lambda (_buf _msg)
+                  (when (save-excursion
+                          (goto-char (point-max))
+                          (re-search-backward "^Coverdata export: ?\\(.*\\)$" nil t))
+                    (rebar-read-coverdata (match-string 1))
+                    (message "%s" (concat (current-message)
+                                          "; rebar cover data updated"))))))
     (rebar-start "eunit" rebar-test-suite)))
 
 ;;;###autoload
@@ -368,7 +373,8 @@ Needs these entries in rebar.config:
                              ("Create Application" rebar-create-app)
                              ("Create" rebar-create)
                              ("EUnit" rebar-eunit)
-                             ("Common Test" rebar-ct))))
+                             ("Common Test" rebar-ct)
+                             ("Cover annotate buffer" rebar-cover-annotate))))
   "See `erlang-menu-base-items' for documentation.")
 
 (defun rebar-install-erlang-menu ()
