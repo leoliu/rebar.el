@@ -144,7 +144,7 @@ If t use all backends in `vc-handled-backends'."
   (rebar-ensure-directory
    (let* ((cmd (concat (rebar-bin) " "
                        (mapconcat 'identity (cl-remove-if #'null cmds) " ")))
-          (cmd (if (string-match-p "skip_deps\\|help" cmd)
+          (cmd (if (string-match-p "skip_deps\\|help\\|-deps" cmd)
                    cmd
                  (concat cmd " skip_deps=true"))))
      (compilation-start cmd 'rebar-compilation-mode))))
@@ -218,6 +218,19 @@ If t use all backends in `vc-handled-backends'."
 (defun rebar-compile (&optional clean)
   (interactive "P")
   (rebar-start (and clean "clean") "compile"))
+
+(defvar rebar-build-command "get-deps update-deps compile skip_deps=false")
+
+;;;###autoload
+(defun rebar-build (&optional edit)
+  "Build the project."
+  (interactive "P")
+  (when edit
+    (let ((new-build (read-string "Build command: " rebar-build-command)))
+      (if (equal new-build "")
+          (message "Empty value ignored; build command unchanged")
+        (setq rebar-build-command new-build))))
+  (rebar-start rebar-build-command))
 
 (defun rebar-read-term ()
   (let* ((to-term (lambda (beg len)
@@ -359,13 +372,14 @@ Needs these entries in rebar.config:
 (defvar rebar-mode-map
   (let ((m (make-sparse-keymap)))
     (define-key m "\M-A" 'rebar-cover-annotate)
-    (define-key m "\M-B" 'rebar-cover-browse)
+    (define-key m "\M-B" 'rebar-build)
     (define-key m "\M-H" 'rebar-help)
     (define-key m "\M-K" 'rebar-compile)
     (define-key m "\M-N" 'rebar-create)
     (define-key m "\M-R" 'rebar)
     (define-key m "\M-T" 'rebar-ct)
     (define-key m "\M-U" 'rebar-eunit)
+    (define-key m "\M-W" 'rebar-cover-browse)
     m))
 
 ;;;###autoload
@@ -385,14 +399,15 @@ Needs these entries in rebar.config:
 
 (defvar rebar-menu-items '(("Rebar"
                             (("Run Command" rebar)
-                             ("Command help" rebar-help)
+                             ("Build" rebar-build)
                              ("Compile" rebar-compile)
                              ("Create Application" rebar-create-app)
                              ("Create" rebar-create)
                              ("EUnit" rebar-eunit)
                              ("Common Test" rebar-ct)
                              ("Cover annotate buffer" rebar-cover-annotate)
-                             ("Browse .COVER.html file" rebar-cover-browse))))
+                             ("Browse .COVER.html file" rebar-cover-browse)
+                             ("Command help" rebar-help))))
   "See `erlang-menu-base-items' for documentation.")
 
 (defun rebar-install-erlang-menu ()
