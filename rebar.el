@@ -3,7 +3,7 @@
 ;; Copyright (C) 2013-2014  Leo Liu
 
 ;; Author: Leo Liu <sdl.web@gmail.com>
-;; Version: 0.4.0
+;; Version: 0.4.1
 ;; Keywords: erlang, tools, processes
 ;; Created: 2013-12-19
 
@@ -58,6 +58,7 @@ If t use all backends in `vc-handled-backends'."
                              ("simplemod" "modid")
                              ("simplelib" "libid")
                              ("simplefsm" "fsmid")
+                             ("simpleevent" "eventid")
                              ("simpleapp" "appid")
                              ("ctsuite" "testmod")
                              ("basicnif" "module"))
@@ -67,9 +68,10 @@ If t use all backends in `vc-handled-backends'."
 
 (defvar rebar-cmds
   '("clean" "compile" "escriptize" "create" "create-app" "create-lib"
-    "create-node" "list-templates" "doc" "check-deps" "get-deps" "update-deps"
-    "delete-deps" "list-deps" "generate" "overlay" "generate-upgrade"
-    "generate-appups" "eunit" "ct" "qc" "xref" "help" "version")
+    "create-node" "list-templates" "doc" "prepare-deps" "refresh-deps"
+    "check-deps" "get-deps" "update-deps" "delete-deps" "list-deps"
+    "generate" "overlay" "generate-upgrade" "generate-appups" "eunit"
+    "ct" "qc" "xref" "shell" "help" "version")
   "List of rebar commands.")
 
 (defun rebar-cmds ()
@@ -98,7 +100,9 @@ If t use all backends in `vc-handled-backends'."
                  inherit-input-method)))
 
 (defun rebar-bin ()
-  (if (file-executable-p "rebar") "./rebar" "rebar"))
+  (if (and (file-executable-p "rebar")
+           (not (file-directory-p "rebar")))
+      "./rebar" "rebar"))
 
 (defvar rebar-find-project-function #'rebar-find-project-default
   "Function used to find rebar project root.")
