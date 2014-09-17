@@ -386,6 +386,20 @@ Needs these entries in rebar.config:
     (define-key m "\M-W" 'rebar-cover-browse)
     m))
 
+(easy-menu-define rebar-mode-menu rebar-mode-map
+  "Menu for Rebar mode."
+  '("Rebar"
+    ["Run Command"              rebar]
+    ["Build"                    rebar-build]
+    ["Compile"                  rebar-compile]
+    ["Create Application"       rebar-create-app]
+    ["Create"                   rebar-create]
+    ["EUnit"                    rebar-eunit]
+    ["Common Test"              rebar-ct]
+    ["Cover annotate buffer"    rebar-cover-annotate]
+    ["Browse .COVER.html file"  rebar-cover-browse]
+    ["Command help"             rebar-help]))
+
 ;;;###autoload
 (define-minor-mode rebar-mode nil
   :lighter (:eval (if global-rebar-mode "" " RB")))
@@ -400,32 +414,6 @@ Needs these entries in rebar.config:
 (defun rebar-minibuffer-setup-function ()
   ;; Disable the keymap in minibuffer.
   (set (make-local-variable 'global-rebar-mode) nil))
-
-(defvar rebar-menu-items '(("Rebar"
-                            (("Run Command" rebar)
-                             ("Build" rebar-build)
-                             ("Compile" rebar-compile)
-                             ("Create Application" rebar-create-app)
-                             ("Create" rebar-create)
-                             ("EUnit" rebar-eunit)
-                             ("Common Test" rebar-ct)
-                             ("Cover annotate buffer" rebar-cover-annotate)
-                             ("Browse .COVER.html file" rebar-cover-browse)
-                             ("Command help" rebar-help))))
-  "See `erlang-menu-base-items' for documentation.")
-
-(defun rebar-install-erlang-menu ()
-  (with-no-warnings
-    (setq erlang-menu-items
-          (erlang-menu-add-above 'rebar-menu-items
-                                 'erlang-menu-compile-items
-                                 erlang-menu-items))
-    (erlang-menu-init))
-  (remove-hook 'erlang-load-hook 'rebar-install-erlang-menu))
-
-(if (featurep 'erlang)
-    (rebar-install-erlang-menu)
-  (add-hook 'erlang-load-hook 'rebar-install-erlang-menu))
 
 (provide 'rebar)
 ;;; rebar.el ends here

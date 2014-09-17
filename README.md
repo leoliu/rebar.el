@@ -10,5 +10,8 @@ installed via `M-x package-install RET cl-lib RET`.
 
 # Usage #
 
-See the documentation on `rebar-mode` or `global-rebar-mode`. In
-erlang mode, an menu item `Rebar` is added to the `Erlang` menu.
+`(add-hook 'erlang-mode-hook 'rebar-mode)`
+
+See the documentation on `rebar-mode` or `global-rebar-mode`. A menu
+named `Rebar` is added to the menu bar if `rebar-mode` or
+`global-rebar-mode` is enabled.
